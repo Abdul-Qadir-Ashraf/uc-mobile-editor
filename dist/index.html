@@ -30,16 +30,16 @@
       <section class="card upload-card" aria-labelledby="files-heading">
         <div class="section-heading">
           <span class="step">1</span>
-          <div><h2 id="files-heading">Add reports</h2><p>Select matching HTML and CSV files together.</p></div>
+          <div><h2 id="files-heading">Add reports</h2><p>Select HTML, CSV, or ZIP files together.</p></div>
         </div>
 
         <label class="drop-zone" id="drop-zone" for="file-input">
-          <input id="file-input" type="file" accept=".html,.csv,text/html,text/csv" multiple>
+          <input id="file-input" type="file" accept=".html,.csv,.zip,text/html,text/csv,application/zip,application/x-zip-compressed" multiple>
           <span class="upload-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M12 3 7 8h3v6h4V8h3l-5-5ZM5 13v7h14v-7h2v9H3v-9h2Z"/></svg>
           </span>
-          <strong>Choose HTML &amp; CSV files</strong>
-          <span>Multiple files are supported</span>
+          <strong>Choose report files or ZIPs</strong>
+          <span>ZIP passwords tried: 123, 1234</span>
         </label>
 
         <div id="file-summary" class="file-summary hidden">
