@@ -1,8 +1,9 @@
-const { BlobReader, BlobWriter, ZipWriter, configure } = globalThis.zip;
+const { BlobReader, BlobWriter, ZipReader, ZipWriter, configure } = globalThis.zip;
 
 configure({ useWebWorkers: false });
 
 const ZIP_PASSWORD = "123";
+const INPUT_ZIP_PASSWORDS = ["123", "1234"];
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const state = {
   files: new Map(),
@@ -47,8 +48,9 @@ const elements = {
 };
 
 function baseName(filename) {
-  const index = filename.lastIndexOf(".");
-  return index > 0 ? filename.slice(0, index) : filename;
+  const leaf = leafName(filename);
+  const index = leaf.lastIndexOf(".");
+  return index > 0 ? leaf.slice(0, index) : leaf;
 }
 
 function extension(filename) {
@@ -56,8 +58,19 @@ function extension(filename) {
   return index >= 0 ? filename.slice(index).toLowerCase() : "";
 }
 
+function leafName(filename) {
+  return filename.split(/[\\/]/).filter(Boolean).at(-1) || filename;
+}
+
 function safeFilename(filename) {
   return filename.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim() || "report";
+}
+
+function reportMimeType(filename) {
+  const ext = extension(filename);
+  if (ext === ".html") return "text/html";
+  if (ext === ".csv") return "text/csv";
+  return "application/octet-stream";
 }
 
 function formatRupees(value) {
@@ -302,6 +315,42 @@ async function createZip(entries, options = {}) {
     await zipWriter.add(entry.name, new BlobReader(entry.blob), { ...writerOptions, level: 6 });
   }
   return zipWriter.close();
+}
+
+async function readZipEntryBlob(entry) {
+  const needsPassword = Boolean(entry.encrypted);
+  const passwordOptions = needsPassword ? INPUT_ZIP_PASSWORDS : [undefined, ...INPUT_ZIP_PASSWORDS];
+  let lastError = null;
+  for (const password of passwordOptions) {
+    try {
+      const options = password ? { password } : {};
+      return await entry.getData(new BlobWriter(reportMimeType(entry.filename)), options);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Could not read ZIP entry.");
+}
+
+async function extractReportFilesFromZip(file) {
+  const zipReader = new ZipReader(new BlobReader(file));
+  const extracted = [];
+  try {
+    const entries = await zipReader.getEntries();
+    for (const entry of entries) {
+      if (entry.directory) continue;
+      const name = leafName(entry.filename);
+      const ext = extension(name);
+      if (![".html", ".csv"].includes(ext)) continue;
+      if (entry.uncompressedSize > MAX_FILE_SIZE) throw new Error(`${name} inside ${file.name} is larger than 20 MB.`);
+      const blob = await readZipEntryBlob(entry);
+      extracted.push(new File([blob], name, { type: reportMimeType(name), lastModified: file.lastModified }));
+    }
+  } finally {
+    await zipReader.close();
+  }
+  if (!extracted.length) throw new Error(`${file.name} does not contain any HTML or CSV report files.`);
+  return extracted;
 }
 
 function textBlob(text, type) {
@@ -569,12 +618,21 @@ async function addFiles(files) {
   elements.errorCard.classList.add("hidden");
   for (const file of files) {
     const ext = extension(file.name);
-    if (![".html", ".csv"].includes(ext)) continue;
+    if (![".html", ".csv", ".zip"].includes(ext)) continue;
     if (file.size > MAX_FILE_SIZE) {
       showError(`${file.name} is larger than 20 MB.`);
       continue;
     }
-    state.files.set(file.name.toLocaleLowerCase(), file);
+    if (ext === ".zip") {
+      try {
+        const reportFiles = await extractReportFilesFromZip(file);
+        for (const reportFile of reportFiles) state.files.set(reportFile.name.toLocaleLowerCase(), reportFile);
+      } catch (error) {
+        showError(`${file.name}: ${error.message}`);
+      }
+      continue;
+    }
+    state.files.set(leafName(file.name).toLocaleLowerCase(), file);
   }
   await analyzeFiles();
 }
