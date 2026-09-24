@@ -2,6 +2,8 @@
 
 A private mobile-first web version of the UC report editor. All HTML and CSV processing happens inside the browser; report contents are never uploaded to the hosting service.
 
+Live site: https://abdul-qadir-ashraf.github.io/uc-mobile-editor/
+
 ## Workflow
 
 1. Select matching HTML and CSV files.
