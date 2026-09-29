@@ -66,6 +66,23 @@ function safeFilename(filename) {
   return filename.replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim() || "report";
 }
 
+function safeImportName(filename) {
+  return safeFilename(filename).replace(/\s+/g, " ");
+}
+
+function uniqueImportName(filename) {
+  const safeName = safeImportName(filename);
+  const ext = extension(safeName);
+  const stem = ext ? safeName.slice(0, -ext.length) : safeName;
+  let candidate = safeName;
+  let index = 2;
+  while (state.files.has(candidate.toLocaleLowerCase())) {
+    candidate = `${stem} (${index})${ext}`;
+    index += 1;
+  }
+  return candidate;
+}
+
 function reportMimeType(filename) {
   const ext = extension(filename);
   if (ext === ".html") return "text/html";
@@ -385,7 +402,10 @@ async function extractReportFilesFromZip(file) {
       if (![".html", ".csv"].includes(ext)) continue;
       if (entry.uncompressedSize > MAX_FILE_SIZE) throw new Error(`${name} inside ${file.name} is larger than 20 MB.`);
       const blob = await readZipEntryBlob(entry);
-      extracted.push(new File([blob], name, { type: reportMimeType(name), lastModified: file.lastModified }));
+      const folder = entry.filename.split(/[\\/]/).filter(Boolean).slice(0, -1).map(safeImportName).join(" - ");
+      const prefix = [baseName(file.name), folder].filter(Boolean).join(" - ");
+      const importName = `${prefix ? `${prefix} - ` : ""}${name}`;
+      extracted.push(new File([blob], importName, { type: reportMimeType(name), lastModified: file.lastModified }));
     }
   } finally {
     await zipReader.close();
@@ -669,13 +689,17 @@ async function addFiles(files) {
     if (ext === ".zip") {
       try {
         const reportFiles = await extractReportFilesFromZip(file);
-        for (const reportFile of reportFiles) state.files.set(reportFile.name.toLocaleLowerCase(), reportFile);
+        for (const reportFile of reportFiles) {
+          const importName = uniqueImportName(reportFile.name);
+          state.files.set(importName.toLocaleLowerCase(), new File([reportFile], importName, { type: reportFile.type, lastModified: reportFile.lastModified }));
+        }
       } catch (error) {
         showError(`${file.name}: ${error.message}`);
       }
       continue;
     }
-    state.files.set(leafName(file.name).toLocaleLowerCase(), file);
+    const importName = uniqueImportName(leafName(file.name));
+    state.files.set(importName.toLocaleLowerCase(), new File([file], importName, { type: file.type, lastModified: file.lastModified }));
   }
   await analyzeFiles();
 }
