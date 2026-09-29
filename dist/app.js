@@ -73,6 +73,10 @@ function reportMimeType(filename) {
   return "application/octet-stream";
 }
 
+function serialKey(serial, occurrence) {
+  return `${String(serial).trim()}\u0000${occurrence}`;
+}
+
 function formatRupees(value) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
 }
@@ -147,7 +151,16 @@ function stationIdFromDocument(documentObject) {
 
 function eligibleSerialsFromHtml(text) {
   const { rows } = parseHtml(text);
-  return rows.filter((cells) => cells[3] === "U" && Number(cells[18] || 0) === 125).map((cells) => cells[0]);
+  const occurrences = new Map();
+  return rows
+    .map((cells) => {
+      const serial = cells[0];
+      const occurrence = (occurrences.get(serial) || 0) + 1;
+      occurrences.set(serial, occurrence);
+      return { cells, key: serialKey(serial, occurrence) };
+    })
+    .filter(({ cells }) => cells[3] === "U" && Number(cells[18] || 0) === 125)
+    .map(({ key }) => key);
 }
 
 function eligibleSerialsFromCsv(text) {
@@ -155,7 +168,15 @@ function eligibleSerialsFromCsv(text) {
   for (const required of ["SLNO", "TYPE", "TOTAL_AMOUNT_CHARGED"]) {
     if (!headers.includes(required)) throw new Error(`CSV column ${required} is missing.`);
   }
-  return rows.filter((row) => row.TYPE === "U" && Number(row.TOTAL_AMOUNT_CHARGED || 0) === 125).map((row) => row.SLNO);
+  const occurrences = new Map();
+  return rows
+    .map((row) => {
+      const occurrence = (occurrences.get(row.SLNO) || 0) + 1;
+      occurrences.set(row.SLNO, occurrence);
+      return { row, key: serialKey(row.SLNO, occurrence) };
+    })
+    .filter(({ row }) => row.TYPE === "U" && Number(row.TOTAL_AMOUNT_CHARGED || 0) === 125)
+    .map(({ key }) => key);
 }
 
 function eodStats(htmlText) {
@@ -218,6 +239,7 @@ function modifyHtml(text, newSerials, mandatorySerials) {
   let finalUpdateCount = 0;
   let changedNew = 0;
   let changedMandatory = 0;
+  const occurrences = new Map();
 
   const modified = replaceClassDiv(text, "details_view", (section) => section.replace(
     /(<tbody\b[^>]*>)([\s\S]*?)(<\/tbody>)/i,
@@ -226,12 +248,15 @@ function modifyHtml(text, newSerials, mandatorySerials) {
         const values = cellValues(rowHtml);
         if (values.length < 19) return rowHtml;
         const serial = values[0];
+        const occurrence = (occurrences.get(serial) || 0) + 1;
+        occurrences.set(serial, occurrence);
+        const key = serialKey(serial, occurrence);
         let updated = rowHtml;
-        if (newSerials.has(serial)) {
+        if (newSerials.has(key)) {
           updated = replaceRowCells(rowHtml, { 3: "E", 10: "HF", 15: "0.0", 16: "0.0", 17: "0.0", 18: "0.0" });
           values[3] = "E";
           changedNew += 1;
-        } else if (mandatorySerials.has(serial)) {
+        } else if (mandatorySerials.has(key)) {
           updated = replaceRowCells(rowHtml, { 4: "Yes", 15: "0.0", 16: "0.0", 17: "0.0", 18: "0.0" });
           changedMandatory += 1;
         }
@@ -258,16 +283,20 @@ function modifyCsv(text, newSerials, mandatorySerials) {
   let newCount = 0;
   let mandatoryCount = 0;
   const zeroColumns = ["GST_APPLIED", "GST_AMOUNT", "AMOUNT_CHARGED_FOR_NEW_ENROLMENT", "AMOUNT_CHARGED_FOR_UPDATE_ENROLMENT"];
+  const occurrences = new Map();
 
   for (const row of rows) {
-    if (newSerials.has(row.SLNO)) {
+    const occurrence = (occurrences.get(row.SLNO) || 0) + 1;
+    occurrences.set(row.SLNO, occurrence);
+    const key = serialKey(row.SLNO, occurrence);
+    if (newSerials.has(key)) {
       row.TYPE = "E";
       row.MANDATORY_BIO_METRIC_UPDATE_ONLY = "No";
       if (headers.includes("PROOF")) row.PROOF = "HF";
       row.TOTAL_AMOUNT_CHARGED = "0.0";
       for (const column of zeroColumns) if (headers.includes(column)) row[column] = "0.0";
       newCount += 1;
-    } else if (mandatorySerials.has(row.SLNO)) {
+    } else if (mandatorySerials.has(key)) {
       row.MANDATORY_BIO_METRIC_UPDATE_ONLY = "Yes";
       row.TOTAL_AMOUNT_CHARGED = "0.0";
       for (const column of zeroColumns) if (headers.includes(column)) row[column] = "0.0";
