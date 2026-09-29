@@ -612,15 +612,12 @@ async function processReports() {
     const newEod = makeEodReport(newRecords, true, oldEod.totals);
     const savedAmount = oldEod.totals.gst - newEod.totals.gst + oldEod.totals.weekly - newEod.totals.weekly;
 
-    const rawEntries = [];
     const protectedEntries = [];
     for (const item of processed) {
       const pairEntries = [{ name: item.report.htmlFile.name, blob: textBlob(item.modifiedHtml, "text/html") }];
-      rawEntries.push({ name: `modified-files/${item.report.htmlFile.name}`, blob: pairEntries[0].blob });
       if (item.modifiedCsv && item.report.csvFile) {
         const csvEntry = { name: item.report.csvFile.name, blob: textBlob(item.modifiedCsv, "text/csv") };
         pairEntries.push(csvEntry);
-        rawEntries.push({ name: `modified-files/${csvEntry.name}`, blob: csvEntry.blob });
       }
       const stationZip = await createZip(pairEntries, { password: ZIP_PASSWORD });
       protectedEntries.push({ name: `${baseName(item.report.htmlFile.name)}.zip`, blob: stationZip });
@@ -628,21 +625,16 @@ async function processReports() {
 
     const oldEodEntry = { name: "OLD EOD.csv", blob: textBlob(oldEod.text, "text/csv") };
     const newEodEntry = { name: "NEW EOD.csv", blob: textBlob(newEod.text, "text/csv") };
-    rawEntries.push({ name: `reports/${oldEodEntry.name}`, blob: oldEodEntry.blob });
-    rawEntries.push({ name: `reports/${newEodEntry.name}`, blob: newEodEntry.blob });
     protectedEntries.push({ name: "OLD EOD.zip", blob: await createZip([oldEodEntry], { password: ZIP_PASSWORD }) });
     protectedEntries.push({ name: "NEW EOD.zip", blob: await createZip([newEodEntry], { password: ZIP_PASSWORD }) });
 
-    const masterEntries = [
-      ...rawEntries,
-      ...protectedEntries.map((entry) => ({ name: `password-protected-zips/${entry.name}`, blob: entry.blob })),
-    ];
+    const masterEntries = protectedEntries.map((entry) => ({ name: entry.name, blob: entry.blob }));
     const masterZip = await createZip(masterEntries);
     const date = new Date();
     const stamp = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, "0"), String(date.getDate()).padStart(2, "0")].join("");
     state.outputs = {
       master: { name: `UC_Mobile_Output_${stamp}.zip`, blob: masterZip },
-      individual: [...protectedEntries, oldEodEntry, newEodEntry],
+      individual: [...protectedEntries],
       summary: { processed: processed.length, totalNew, totalMandatory, savedAmount },
     };
     renderResults();

@@ -9,7 +9,7 @@ Live site: https://abdul-qadir-ashraf.github.io/uc-mobile-editor/
 1. Select matching HTML and CSV files, or upload password-protected ZIP files directly.
 2. Choose the total conversion percentage and New Enrolment share.
 3. Generate modified reports and password-protected station ZIPs.
-4. Download the complete output package or individual files.
+4. Download the complete ZIP-only output package or individual ZIP files.
 
 Input ZIP passwords `123` and `1234` are supported.
 The individual ZIP password is `123`, matching the desktop editor.
