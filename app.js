@@ -77,6 +77,14 @@ function serialKey(serial, occurrence) {
   return `${String(serial).trim()}\u0000${occurrence}`;
 }
 
+function isEligibleHtmlRow(cells) {
+  return cells[3] === "U" && Number(cells[18] || 0) === 125;
+}
+
+function isEligibleCsvRow(row) {
+  return row.TYPE === "U" && Number(row.TOTAL_AMOUNT_CHARGED || 0) === 125;
+}
+
 function formatRupees(value) {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
 }
@@ -152,15 +160,15 @@ function stationIdFromDocument(documentObject) {
 function eligibleSerialsFromHtml(text) {
   const { rows } = parseHtml(text);
   const occurrences = new Map();
-  return rows
-    .map((cells) => {
+  const keys = [];
+  for (const cells of rows) {
+    if (!isEligibleHtmlRow(cells)) continue;
       const serial = cells[0];
       const occurrence = (occurrences.get(serial) || 0) + 1;
       occurrences.set(serial, occurrence);
-      return { cells, key: serialKey(serial, occurrence) };
-    })
-    .filter(({ cells }) => cells[3] === "U" && Number(cells[18] || 0) === 125)
-    .map(({ key }) => key);
+    keys.push(serialKey(serial, occurrence));
+  }
+  return keys;
 }
 
 function eligibleSerialsFromCsv(text) {
@@ -169,14 +177,14 @@ function eligibleSerialsFromCsv(text) {
     if (!headers.includes(required)) throw new Error(`CSV column ${required} is missing.`);
   }
   const occurrences = new Map();
-  return rows
-    .map((row) => {
+  const keys = [];
+  for (const row of rows) {
+    if (!isEligibleCsvRow(row)) continue;
       const occurrence = (occurrences.get(row.SLNO) || 0) + 1;
       occurrences.set(row.SLNO, occurrence);
-      return { row, key: serialKey(row.SLNO, occurrence) };
-    })
-    .filter(({ row }) => row.TYPE === "U" && Number(row.TOTAL_AMOUNT_CHARGED || 0) === 125)
-    .map(({ key }) => key);
+    keys.push(serialKey(row.SLNO, occurrence));
+  }
+  return keys;
 }
 
 function eodStats(htmlText) {
@@ -247,16 +255,19 @@ function modifyHtml(text, newSerials, mandatorySerials) {
       const updatedBody = body.replace(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi, (rowHtml) => {
         const values = cellValues(rowHtml);
         if (values.length < 19) return rowHtml;
-        const serial = values[0];
-        const occurrence = (occurrences.get(serial) || 0) + 1;
-        occurrences.set(serial, occurrence);
-        const key = serialKey(serial, occurrence);
+        let key = null;
+        if (isEligibleHtmlRow(values)) {
+          const serial = values[0];
+          const occurrence = (occurrences.get(serial) || 0) + 1;
+          occurrences.set(serial, occurrence);
+          key = serialKey(serial, occurrence);
+        }
         let updated = rowHtml;
-        if (newSerials.has(key)) {
+        if (key && newSerials.has(key)) {
           updated = replaceRowCells(rowHtml, { 3: "E", 10: "HF", 15: "0.0", 16: "0.0", 17: "0.0", 18: "0.0" });
           values[3] = "E";
           changedNew += 1;
-        } else if (mandatorySerials.has(key)) {
+        } else if (key && mandatorySerials.has(key)) {
           updated = replaceRowCells(rowHtml, { 4: "Yes", 15: "0.0", 16: "0.0", 17: "0.0", 18: "0.0" });
           changedMandatory += 1;
         }
@@ -286,6 +297,7 @@ function modifyCsv(text, newSerials, mandatorySerials) {
   const occurrences = new Map();
 
   for (const row of rows) {
+    if (!isEligibleCsvRow(row)) continue;
     const occurrence = (occurrences.get(row.SLNO) || 0) + 1;
     occurrences.set(row.SLNO, occurrence);
     const key = serialKey(row.SLNO, occurrence);
@@ -407,7 +419,9 @@ async function analyzeFiles() {
       const htmlText = await pair.html.text();
       const { documentObject } = parseHtml(htmlText);
       const csvText = pair.csv ? await pair.csv.text() : null;
-      const serials = csvText ? eligibleSerialsFromCsv(csvText) : eligibleSerialsFromHtml(htmlText);
+      const htmlSerials = eligibleSerialsFromHtml(htmlText);
+      const csvSerialSet = csvText ? new Set(eligibleSerialsFromCsv(csvText)) : null;
+      const serials = csvSerialSet ? htmlSerials.filter((serial) => csvSerialSet.has(serial)) : htmlSerials;
       state.reports.push({
         htmlFile: pair.html,
         csvFile: pair.csv || null,
